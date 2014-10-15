@@ -186,7 +186,7 @@ namespace DMPServerListReporter
                 LoadSettings();
             }
         }
-        
+
         public static string CalculateSHA256Hash(string text)
         {
             UTF8Encoding encoder = new UTF8Encoding();
@@ -298,7 +298,6 @@ namespace DMPServerListReporter
                 mw.Write<int>(DarkMultiPlayerCommon.Common.PROTOCOL_VERSION);
                 mw.Write<string>(DarkMultiPlayerCommon.Common.PROGRAM_VERSION);
                 mw.Write<int>(Settings.settingsStore.maxPlayers);
-                mw.Write<int>(Server.playerCount);
                 mw.Write<int>((int)Settings.settingsStore.modControl);
                 mw.Write<string>(Server.GetModControlSHA());
                 mw.Write<int>((int)Settings.settingsStore.gameMode);
@@ -312,9 +311,22 @@ namespace DMPServerListReporter
                 mw.Write<string>(settingsStore.team);
                 mw.Write<string>(settingsStore.location);
                 mw.Write<bool>(settingsStore.fixedIP);
-                mw.Write<string>(Server.players);
+                mw.Write<string[]>(GetServerPlayerArray());
                 QueueNetworkMessage(mw.GetMessageBytes());
             }
+        }
+
+        private string[] GetServerPlayerArray()
+        {
+            List<string> connectedPlayers = new List<string>();
+            foreach (ClientObject client in ClientHandler.GetClients())
+            {
+                if (client.authenticated)
+                {
+                    connectedPlayers.Add(client.playerName);
+                }
+            }
+            return connectedPlayers.ToArray();
         }
 
         private void QueueHeartbeat()
