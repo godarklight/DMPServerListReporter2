@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
+using System.Security.Cryptography;
 using System.Threading;
 using DarkMultiPlayerServer;
 using MessageStream;
@@ -19,7 +21,8 @@ namespace DMPServerListReporter
         //Connection retry attempt every 120s
         private const int CONNECTION_RETRY = 120000;
         //Settings file name
-        private const string SETTINGS_FILE = "ReportingServer.txt";
+        private const string TOKEN_FILE = "ReportingToken.txt";
+        private const string SETTINGS_FILE = "ReportingSettings.txt";
         //Last time the connection was attempted
         private long lastConnectionTry = long.MinValue;
         //Last message send time
@@ -34,8 +37,8 @@ namespace DMPServerListReporter
         private Thread sendThread;
         private AutoResetEvent sendEvent = new AutoResetEvent(false);
         private Queue<byte[]> sendMessages = new Queue<byte[]>();
-        //Reporting endpoint
-        private IPEndPoint reportingEndpoint;
+        //Settings
+        ReportingSettings settingsStore = new ReportingSettings();
 
         public Main()
         {
@@ -44,15 +47,104 @@ namespace DMPServerListReporter
 
         private void LoadSettings()
         {
+            string tokenFileFullPath = Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location), TOKEN_FILE);
+            if (!File.Exists(tokenFileFullPath))
+            {
+                using (StreamWriter sw = new StreamWriter(tokenFileFullPath))
+                {
+                    sw.WriteLine(Guid.NewGuid().ToString());
+                }
+            }
+            using (StreamReader sr = new StreamReader(tokenFileFullPath))
+            {
+                settingsStore.serverHash = CalculateSHA256Hash(sr.ReadLine());
+            }
             string settingsFileFullPath = Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location), SETTINGS_FILE);
             if (!File.Exists(settingsFileFullPath))
             {
-                File.WriteAllText(settingsFileFullPath, "dmp.52k.de:9001");
+                using (StreamWriter sw = new StreamWriter(settingsFileFullPath))
+                {
+                    sw.WriteLine("reporting = dmp.52k.de:9001");
+                    sw.WriteLine("gameAddress = ");
+                    sw.WriteLine("banner = ");
+                    sw.WriteLine("homepage = ");
+                    sw.WriteLine("admin = ");
+                    sw.WriteLine("team = ");
+                    sw.WriteLine("location = ");
+                    sw.WriteLine("fixedIP = false");
+                    sw.WriteLine("description = ");
+                }
             }
             bool reloadSettings = false;
-            string connectionAddress = File.ReadAllLines(settingsFileFullPath)[0];
+            using (StreamReader sr = new StreamReader(settingsFileFullPath))
+            {
+                string currentLine;
+
+                while ((currentLine = sr.ReadLine()) != null)
+                {
+                    try
+                    {
+                        string key = currentLine.Substring(0, currentLine.IndexOf("=")).Trim();
+                        string value = currentLine.Substring(currentLine.IndexOf("=") + 1).Trim();
+                        switch (key)
+                        {
+                            case "reporting":
+                                {
+                                    string address = value.Substring(0, value.LastIndexOf(":"));
+                                    string port = value.Substring(value.LastIndexOf(":") + 1);
+                                    IPAddress reportingIP;
+                                    int reportingPort = 0;
+                                    if (Int32.TryParse(port, out reportingPort))
+                                    {
+                                        if (reportingPort > 0 && reportingPort < 65535)
+                                        {
+                                            //Try parsing the address directly before trying a DNS lookup
+                                            if (!IPAddress.TryParse(address, out reportingIP))
+                                            {
+                                                IPHostEntry entry = Dns.GetHostEntry(address);
+                                                reportingIP = entry.AddressList[0];
+                                            }
+                                            settingsStore.reportingEndpoint = new IPEndPoint(reportingIP, reportingPort);
+                                        }
+                                    }
+                                }
+                                break;
+                            case "gameAddress":
+                                settingsStore.gameAddress = value;
+                                break;
+                            case "banner":
+                                settingsStore.banner = value;
+                                break;
+                            case "homepage":
+                                settingsStore.homepage = value;
+                                break;
+                            case "admin":
+                                settingsStore.admin = value;
+                                break;
+                            case "team":
+                                settingsStore.team = value;
+                                break;
+                            case "location":
+                                settingsStore.location = value;
+                                break;
+                            case "fixedIP":
+                                settingsStore.fixedIP = (value == "true");
+                                break;
+                            case "description":
+                                settingsStore.description = value;
+                                break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        DarkLog.Error("Error reading settings file, Exception " + e);
+                    }
+                }
+            }
+            /*
             try
             {
+
                 string[] connectionParts = connectionAddress.Split(':');
                 string address = connectionParts[0];
                 string port = connectionParts[1];
@@ -86,12 +178,30 @@ namespace DMPServerListReporter
             {
                 reloadSettings = true;
             }
+            */
             if (reloadSettings)
             {
                 //Load with the default settings if anything is incorrect.
                 File.Delete(settingsFileFullPath);
                 LoadSettings();
             }
+        }
+        
+        public static string CalculateSHA256Hash(string text)
+        {
+            UTF8Encoding encoder = new UTF8Encoding();
+            byte[] encodedBytes = encoder.GetBytes(text);
+            StringBuilder sb = new StringBuilder();
+            using (SHA256Managed sha = new SHA256Managed())
+            {
+                byte[] fileHashData = sha.ComputeHash(encodedBytes);
+                //Byte[] to string conversion adapted from MSDN...
+                for (int i = 0; i < fileHashData.Length; i++)
+                {
+                    sb.Append(fileHashData[i].ToString("x2"));
+                }
+            }
+            return sb.ToString();
         }
 
         public override void OnUpdate()
@@ -119,7 +229,7 @@ namespace DMPServerListReporter
             try
             {
                 connection = new TcpClient();
-                connection.Connect(reportingEndpoint);
+                connection.Connect(settingsStore.reportingEndpoint);
                 if (connection.Connected)
                 {
                     DarkLog.Debug("Connected to reporting server");
@@ -180,23 +290,30 @@ namespace DMPServerListReporter
         {
             using (MessageWriter mw = new MessageWriter())
             {
-                mw.Write<bool>(Settings.settingsStore.cheats);
-                mw.Write<int>((int)Settings.settingsStore.gameMode);
-                mw.Write<int>((int)Settings.settingsStore.modControl);
-                mw.Write<int>((int)Settings.settingsStore.warpMode);
-                mw.Write<int>(Settings.settingsStore.maxPlayers);
-                mw.Write<int>(Server.playerCount);
-                mw.Write<string>(Server.players);
-                mw.Write<long>(Server.lastPlayerActivity);
+                mw.Write<string>(settingsStore.serverHash);
+                mw.Write<string>(Settings.settingsStore.serverName);
+                mw.Write<string>(settingsStore.description);
                 mw.Write<int>(Settings.settingsStore.port);
-                mw.Write<int>(Settings.settingsStore.httpPort);
+                mw.Write<string>(settingsStore.gameAddress);
                 mw.Write<int>(DarkMultiPlayerCommon.Common.PROTOCOL_VERSION);
                 mw.Write<string>(DarkMultiPlayerCommon.Common.PROGRAM_VERSION);
-                mw.Write<string>(Settings.settingsStore.serverName);
+                mw.Write<int>(Settings.settingsStore.maxPlayers);
+                mw.Write<int>(Server.playerCount);
+                mw.Write<int>((int)Settings.settingsStore.modControl);
+                mw.Write<string>(Server.GetModControlSHA());
+                mw.Write<int>((int)Settings.settingsStore.gameMode);
+                mw.Write<bool>(Settings.settingsStore.cheats);
+                mw.Write<int>((int)Settings.settingsStore.warpMode);
                 mw.Write<long>(Server.GetUniverseSize());
-
+                mw.Write<string>(settingsStore.banner);
+                mw.Write<string>(settingsStore.homepage);
+                mw.Write<int>(Settings.settingsStore.httpPort);
+                mw.Write<string>(settingsStore.admin);
+                mw.Write<string>(settingsStore.team);
+                mw.Write<string>(settingsStore.location);
+                mw.Write<bool>(settingsStore.fixedIP);
+                mw.Write<string>(Server.players);
                 QueueNetworkMessage(mw.GetMessageBytes());
-                File.WriteAllBytes("/home/darklight/DUMP.txt", mw.GetMessageBytes());
             }
         }
 
@@ -218,7 +335,7 @@ namespace DMPServerListReporter
             byte[] messageBytes = new byte[data.Length + 8];
             BitConverter.GetBytes(REPORTING_PROTOCOL_ID).CopyTo(messageBytes, 0);
             BitConverter.GetBytes(data.Length).CopyTo(messageBytes, 4);
-            Array.Copy(data, 0, messageBytes, 0, data.Length);
+            Array.Copy(data, 0, messageBytes, 8, data.Length);
             lock (sendMessages)
             {
                 sendMessages.Enqueue(messageBytes);
