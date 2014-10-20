@@ -39,6 +39,8 @@ namespace DMPServerListReporter
         private Queue<byte[]> sendMessages = new Queue<byte[]>();
         //Settings
         ReportingSettings settingsStore = new ReportingSettings();
+        //Client state tracking
+        List<string> connectedPlayers = new List<string>();
 
         public Main()
         {
@@ -64,7 +66,7 @@ namespace DMPServerListReporter
             {
                 using (StreamWriter sw = new StreamWriter(settingsFileFullPath))
                 {
-                    sw.WriteLine("reporting = dmp.52k.de:9001");
+                    sw.WriteLine("reporting = server.game.api.d-mp.org:9001");
                     sw.WriteLine("gameAddress = ");
                     sw.WriteLine("banner = ");
                     sw.WriteLine("homepage = ");
@@ -216,11 +218,13 @@ namespace DMPServerListReporter
 
         public override void OnClientAuthenticated(ClientObject client)
         {
+            connectedPlayers.Add(client.playerName);
             ReportData();
         }
 
         public override void OnClientDisconnect(ClientObject client)
         {
+            connectedPlayers.Remove(client.playerName);
             ReportData();
         }
 
@@ -318,14 +322,6 @@ namespace DMPServerListReporter
 
         private string[] GetServerPlayerArray()
         {
-            List<string> connectedPlayers = new List<string>();
-            foreach (ClientObject client in ClientHandler.GetClients())
-            {
-                if (client.authenticated)
-                {
-                    connectedPlayers.Add(client.playerName);
-                }
-            }
             return connectedPlayers.ToArray();
         }
 
