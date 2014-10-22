@@ -299,8 +299,11 @@ namespace DMPServerListReporter
                 mw.Write<string>(settingsStore.description);
                 mw.Write<int>(Settings.settingsStore.port);
                 mw.Write<string>(settingsStore.gameAddress);
-                mw.Write<int>(DarkMultiPlayerCommon.Common.PROTOCOL_VERSION);
-                mw.Write<string>(DarkMultiPlayerCommon.Common.PROGRAM_VERSION);
+                //Constants are baked, so we have to reflect them.
+                int protocolVersion = (int)typeof(DarkMultiPlayerCommon.Common).GetField("PROTOCOL_VERSION").GetValue(null);
+                mw.Write<int>(protocolVersion);
+                string programVersion = (string)typeof(DarkMultiPlayerCommon.Common).GetField("PROGRAM_VERSION").GetValue(null);
+                mw.Write<string>(programVersion);
                 mw.Write<int>(Settings.settingsStore.maxPlayers);
                 mw.Write<int>((int)Settings.settingsStore.modControl);
                 mw.Write<string>(Server.GetModControlSHA());
