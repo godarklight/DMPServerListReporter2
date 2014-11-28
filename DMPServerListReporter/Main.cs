@@ -28,12 +28,14 @@ namespace DMPServerListReporter
         //Last message send time
         private long lastMessageSendTime = long.MinValue;
         //Whether we are connected to the reporting server
+        private bool loadedSettings;
         private bool connectedStatus;
         //Actual TCP connection
         private TcpClient connection;
         //Uses explicit threads - The async methods whack out for some people in some rare cases it seems.
         //Plus, we can explicitly terminate the thread to kill the connection upon shutdown.
         private Thread connectThread;
+        private Thread loadThread;
         private Thread sendThread;
         private AutoResetEvent sendEvent = new AutoResetEvent(false);
         private Queue<byte[]> sendMessages = new Queue<byte[]>();
@@ -44,7 +46,17 @@ namespace DMPServerListReporter
 
         public Main()
         {
-            LoadSettings();
+            loadThread = new Thread(new ThreadStart(LoadSettings));
+            loadThread.Start();
+            CommandHandler.RegisterCommand("reloadreporter", ReloadSettings, "Reload the reporting plugin settings");
+        }
+
+        private void ReloadSettings(string args)
+        {
+            loadedSettings = false;
+            DisconnectFromServer();
+            loadThread = new Thread(new ThreadStart(LoadSettings));
+            loadThread.Start();
         }
 
         private void LoadSettings()
@@ -80,113 +92,86 @@ namespace DMPServerListReporter
             bool reloadSettings = false;
             using (StreamReader sr = new StreamReader(settingsFileFullPath))
             {
+                bool readingDescription = false;
                 string currentLine;
 
                 while ((currentLine = sr.ReadLine()) != null)
                 {
-                    try
+                    if (!readingDescription)
                     {
-                        string key = currentLine.Substring(0, currentLine.IndexOf("=")).Trim();
-                        string value = currentLine.Substring(currentLine.IndexOf("=") + 1).Trim();
-                        switch (key)
+                        try
                         {
-                            case "reporting":
-                                {
-                                    string address = value.Substring(0, value.LastIndexOf(":"));
-                                    string port = value.Substring(value.LastIndexOf(":") + 1);
-                                    IPAddress reportingIP;
-                                    int reportingPort = 0;
-                                    if (Int32.TryParse(port, out reportingPort))
+                            string key = currentLine.Substring(0, currentLine.IndexOf("=")).Trim();
+                            string value = currentLine.Substring(currentLine.IndexOf("=") + 1).Trim();
+                            switch (key)
+                            {
+                                case "reporting":
                                     {
-                                        if (reportingPort > 0 && reportingPort < 65535)
+                                        string address = value.Substring(0, value.LastIndexOf(":"));
+                                        string port = value.Substring(value.LastIndexOf(":") + 1);
+                                        IPAddress reportingIP;
+                                        int reportingPort = 0;
+                                        if (Int32.TryParse(port, out reportingPort))
                                         {
-                                            //Try parsing the address directly before trying a DNS lookup
-                                            if (!IPAddress.TryParse(address, out reportingIP))
+                                            if (reportingPort > 0 && reportingPort < 65535)
                                             {
-                                                IPHostEntry entry = Dns.GetHostEntry(address);
-                                                reportingIP = entry.AddressList[0];
+                                                //Try parsing the address directly before trying a DNS lookup
+                                                if (!IPAddress.TryParse(address, out reportingIP))
+                                                {
+                                                    IPHostEntry entry = Dns.GetHostEntry(address);
+                                                    reportingIP = entry.AddressList[0];
+                                                }
+                                                settingsStore.reportingEndpoint = new IPEndPoint(reportingIP, reportingPort);
                                             }
-                                            settingsStore.reportingEndpoint = new IPEndPoint(reportingIP, reportingPort);
                                         }
                                     }
-                                }
-                                break;
-                            case "gameAddress":
-                                settingsStore.gameAddress = value;
-                                break;
-                            case "banner":
-                                settingsStore.banner = value;
-                                break;
-                            case "homepage":
-                                settingsStore.homepage = value;
-                                break;
-                            case "admin":
-                                settingsStore.admin = value;
-                                break;
-                            case "team":
-                                settingsStore.team = value;
-                                break;
-                            case "location":
-                                settingsStore.location = value;
-                                break;
-                            case "fixedIP":
-                                settingsStore.fixedIP = (value == "true");
-                                break;
-                            case "description":
-                                settingsStore.description = value;
-                                break;
+                                    break;
+                                case "gameAddress":
+                                    settingsStore.gameAddress = value;
+                                    break;
+                                case "banner":
+                                    settingsStore.banner = value;
+                                    break;
+                                case "homepage":
+                                    settingsStore.homepage = value;
+                                    break;
+                                case "admin":
+                                    settingsStore.admin = value;
+                                    break;
+                                case "team":
+                                    settingsStore.team = value;
+                                    break;
+                                case "location":
+                                    settingsStore.location = value;
+                                    break;
+                                case "fixedIP":
+                                    settingsStore.fixedIP = (value == "true");
+                                    break;
+                                case "description":
+                                    readingDescription = true;
+                                    settingsStore.description = value;
+                                    break;
+                            }
                         }
-                    }
-                    catch (Exception e)
-                    {
-                        DarkLog.Error("Error reading settings file, Exception " + e);
-                    }
-                }
-            }
-            /*
-            try
-            {
-
-                string[] connectionParts = connectionAddress.Split(':');
-                string address = connectionParts[0];
-                string port = connectionParts[1];
-                IPAddress reportingIP;
-                int reportingPort;
-                //Make sure the port is correct
-                if (Int32.TryParse(port, out reportingPort))
-                {
-                    if (reportingPort > 0 && reportingPort < 65535)
-                    {
-                        //Try parsing the address directly before trying a DNS lookup
-                        if (!IPAddress.TryParse(address, out reportingIP))
+                        catch (Exception e)
                         {
-                            IPHostEntry entry = Dns.GetHostEntry(address);
-                            reportingIP = entry.AddressList[0];
+                            DarkLog.Error("Error reading settings file, Exception " + e);
                         }
-                        reportingEndpoint = new IPEndPoint(reportingIP, reportingPort);
                     }
                     else
                     {
-                        reloadSettings = true;
+                        //Reading description
+                        settingsStore.description += "\n" + currentLine;
                     }
-
-                }
-                else
-                {
-                    reloadSettings = true;
                 }
             }
-            catch
-            {
-                reloadSettings = true;
-            }
-            */
             if (reloadSettings)
             {
                 //Load with the default settings if anything is incorrect.
                 File.Delete(settingsFileFullPath);
                 LoadSettings();
             }
+            loadedSettings = true;
         }
 
         public static string CalculateSHA256Hash(string text)
@@ -208,7 +193,7 @@ namespace DMPServerListReporter
 
         public override void OnUpdate()
         {
-            if (!connectedStatus && (Server.serverClock.ElapsedMilliseconds > (lastConnectionTry + CONNECTION_RETRY)))
+            if (!connectedStatus && loadedSettings && Server.serverRunning && (Server.serverClock.ElapsedMilliseconds > (lastConnectionTry + CONNECTION_RETRY)))
             {
                 lastConnectionTry = Server.serverClock.ElapsedMilliseconds;
                 connectThread = new Thread(new ThreadStart(ConnectToServer));
@@ -226,6 +211,11 @@ namespace DMPServerListReporter
         {
             connectedPlayers.Remove(client.playerName);
             ReportData();
+        }
+
+        public override void OnServerStop()
+        {
+            DisconnectFromServer();
         }
 
         private void ConnectToServer()
@@ -248,6 +238,14 @@ namespace DMPServerListReporter
             {
                 DarkLog.Debug("Error connecting to reporting server: " + e);
             }
+        }
+
+        private void DisconnectFromServer()
+        {
+            lastConnectionTry = long.MinValue;
+            sendThread.Abort();
+            connection.Close();
+            connectedStatus = false;
         }
 
         private void SendThreadMain()
