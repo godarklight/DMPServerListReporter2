@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>10.0.0</ProductVersion>
+    <ProductVersion>8.0.30703</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{19E3B27B-A25D-43E0-A825-EA5B0839594D}</ProjectGuid>
     <OutputType>Library</OutputType>
@@ -38,8 +38,8 @@
       <HintPath>..\DMPServer.exe</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="MessageWriter">
-      <HintPath>..\MessageWriter.dll</HintPath>
+    <Reference Include="MessageWriter2">
+      <HintPath>..\MessageWriter2.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>

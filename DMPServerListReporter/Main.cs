@@ -7,7 +7,7 @@ using System.Text;
 using System.Security.Cryptography;
 using System.Threading;
 using DarkMultiPlayerServer;
-using MessageStream;
+using MessageStream2;
 
 namespace DMPServerListReporter
 {
@@ -15,7 +15,7 @@ namespace DMPServerListReporter
     {
         //Bump number when we change the format
         private const int HEARTBEAT_ID = 0;
-        private const int REPORTING_PROTOCOL_ID = 1;
+        private const int REPORTING_PROTOCOL_ID = 2;
         //Heartbeat every 10 seconds
         private const int CONNECTION_HEARTBEAT = 10000;
         //Connection retry attempt every 120s
