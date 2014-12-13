@@ -254,25 +254,27 @@ namespace DMPServerListReporter
             {
                 while (true)
                 {
+                    if (Server.serverClock.ElapsedMilliseconds > (lastMessageSendTime + CONNECTION_HEARTBEAT))
+                    {
+                        lastMessageSendTime = Server.serverClock.ElapsedMilliseconds;
+                        //Queue a heartbeat to prevent the connection from timing out
+                        QueueHeartbeat();
+                    }
+                    byte[] sendBytes = null;
                     lock (sendMessages)
                     {
-                        if (Server.serverClock.ElapsedMilliseconds > (lastMessageSendTime + CONNECTION_HEARTBEAT))
+                        if (sendMessages.Count > 0)
                         {
-                            lastMessageSendTime = Server.serverClock.ElapsedMilliseconds;
-                            //Queue a heartbeat to prevent the connection from timing out
-                            QueueHeartbeat();
+                            sendBytes = sendMessages.Dequeue();
                         }
-                        if (sendMessages.Count == 0)
-                        {
-                            sendEvent.WaitOne(100);
-                        }
-                        else
-                        {
-                            while (sendMessages.Count > 0)
-                            {
-                                SendNetworkMessage(sendMessages.Dequeue());
-                            }
-                        }
+                    }
+                    if (sendBytes != null)
+                    {
+                        SendNetworkMessage(sendBytes);
+                    }
+                    else
+                    {
+                        sendEvent.WaitOne(100);
                     }
                 }
             }
