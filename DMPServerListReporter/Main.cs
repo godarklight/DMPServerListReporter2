@@ -19,24 +19,16 @@ namespace DMPServerListReporter
         //Heartbeat every 10 seconds
         private const int CONNECTION_HEARTBEAT = 10000;
         //Connection retry attempt every 120s
-        private const int CONNECTION_RETRY = 120000;
+        private const int CONNECTION_RETRY = 60000;
+        private double lastMessageSendTime = double.NegativeInfinity;
         //Settings file name
         private const string TOKEN_FILE = "ReportingToken.txt";
-        private const string SETTINGS_FILE = "ReportingSettings.txt";
-        //Last time the connection was attempted
-        private long lastConnectionTry = long.MinValue;
-        //Last message send time
-        private long lastMessageSendTime = long.MinValue;
-        //Whether we are connected to the reporting server
-        private bool loadedSettings;
-        private bool connectedStatus;
-        //Actual TCP connection
-        private TcpClient connection;
-        //Uses explicit threads - The async methods whack out for some people in some rare cases it seems.
+        private const string DESCRIPTION_FILE = "ReportingDescription.txt";
+        private const string OLD_SETTINGS_FILE = "ReportingSettings.txt";
+        private const string NEW_SETTINGS_FILE = "ReportingSettings.xml";
         //Plus, we can explicitly terminate the thread to kill the connection upon shutdown.
-        private Thread connectThread;
-        private Thread loadThread;
-        private Thread sendThread;
+        private Thread reportThread;
+        TcpClient currentConnection;
         private AutoResetEvent sendEvent = new AutoResetEvent(false);
         private Queue<byte[]> sendMessages = new Queue<byte[]>();
         //Settings
@@ -46,132 +38,16 @@ namespace DMPServerListReporter
 
         public Main()
         {
-            loadThread = new Thread(new ThreadStart(LoadSettings));
-            loadThread.Start();
+            settingsStore.LoadSettings(OLD_SETTINGS_FILE, NEW_SETTINGS_FILE, TOKEN_FILE, DESCRIPTION_FILE);
             CommandHandler.RegisterCommand("reloadreporter", ReloadSettings, "Reload the reporting plugin settings");
         }
 
-        private void ReloadSettings(string args)
+        private void ReloadSettings(string commandText)
         {
-            loadedSettings = false;
-            DisconnectFromServer();
-            loadThread = new Thread(new ThreadStart(LoadSettings));
-            loadThread.Start();
-        }
-
-        private void LoadSettings()
-        {
-            string tokenFileFullPath = Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location), TOKEN_FILE);
-            if (!File.Exists(tokenFileFullPath))
-            {
-                using (StreamWriter sw = new StreamWriter(tokenFileFullPath))
-                {
-                    sw.WriteLine(Guid.NewGuid().ToString());
-                }
-            }
-            using (StreamReader sr = new StreamReader(tokenFileFullPath))
-            {
-                settingsStore.serverHash = CalculateSHA256Hash(sr.ReadLine());
-            }
-            string settingsFileFullPath = Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location), SETTINGS_FILE);
-            if (!File.Exists(settingsFileFullPath))
-            {
-                using (StreamWriter sw = new StreamWriter(settingsFileFullPath))
-                {
-                    sw.WriteLine("reporting = server.game.api.d-mp.org:9001");
-                    sw.WriteLine("gameAddress = ");
-                    sw.WriteLine("banner = ");
-                    sw.WriteLine("homepage = ");
-                    sw.WriteLine("admin = ");
-                    sw.WriteLine("team = ");
-                    sw.WriteLine("location = ");
-                    sw.WriteLine("fixedIP = false");
-                    sw.WriteLine("description = ");
-                }
-            }
-            bool reloadSettings = false;
-            using (StreamReader sr = new StreamReader(settingsFileFullPath))
-            {
-                bool readingDescription = false;
-                string currentLine;
-
-                while ((currentLine = sr.ReadLine()) != null)
-                {
-                    if (!readingDescription)
-                    {
-                        try
-                        {
-                            string key = currentLine.Substring(0, currentLine.IndexOf("=")).Trim();
-                            string value = currentLine.Substring(currentLine.IndexOf("=") + 1).Trim();
-                            switch (key)
-                            {
-                                case "reporting":
-                                    {
-                                        string address = value.Substring(0, value.LastIndexOf(":"));
-                                        string port = value.Substring(value.LastIndexOf(":") + 1);
-                                        IPAddress reportingIP;
-                                        int reportingPort = 0;
-                                        if (Int32.TryParse(port, out reportingPort))
-                                        {
-                                            if (reportingPort > 0 && reportingPort < 65535)
-                                            {
-                                                //Try parsing the address directly before trying a DNS lookup
-                                                if (!IPAddress.TryParse(address, out reportingIP))
-                                                {
-                                                    IPHostEntry entry = Dns.GetHostEntry(address);
-                                                    reportingIP = entry.AddressList[0];
-                                                }
-                                                settingsStore.reportingEndpoint = new IPEndPoint(reportingIP, reportingPort);
-                                            }
-                                        }
-                                    }
-                                    break;
-                                case "gameAddress":
-                                    settingsStore.gameAddress = value;
-                                    break;
-                                case "banner":
-                                    settingsStore.banner = value;
-                                    break;
-                                case "homepage":
-                                    settingsStore.homepage = value;
-                                    break;
-                                case "admin":
-                                    settingsStore.admin = value;
-                                    break;
-                                case "team":
-                                    settingsStore.team = value;
-                                    break;
-                                case "location":
-                                    settingsStore.location = value;
-                                    break;
-                                case "fixedIP":
-                                    settingsStore.fixedIP = (value == "true");
-                                    break;
-                                case "description":
-                                    readingDescription = true;
-                                    settingsStore.description = value;
-                                    break;
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            DarkLog.Error("Error reading settings file, Exception " + e);
-                        }
-                    }
-                    else
-                    {
-                        //Reading description
-                        settingsStore.description += "\n" + currentLine;
-                    }
-                }
-            }
-            if (reloadSettings)
-            {
-                //Load with the default settings if anything is incorrect.
-                File.Delete(settingsFileFullPath);
-                LoadSettings();
-            }
-            loadedSettings = true;
+            StopReporter();
+            settingsStore = new ReportingSettings();
+            settingsStore.LoadSettings(OLD_SETTINGS_FILE, NEW_SETTINGS_FILE, TOKEN_FILE, DESCRIPTION_FILE);
+            StartReporter();
         }
 
         public static string CalculateSHA256Hash(string text)
@@ -191,6 +67,12 @@ namespace DMPServerListReporter
             return sb.ToString();
         }
 
+        public override void OnServerStart()
+        {
+            StartReporter();
+        }
+
+        /*
         public override void OnUpdate()
         {
             if (!connectedStatus && loadedSettings && Server.serverRunning && (Server.serverClock.ElapsedMilliseconds > (lastConnectionTry + CONNECTION_RETRY)))
@@ -200,6 +82,7 @@ namespace DMPServerListReporter
                 connectThread.Start();
             }
         }
+        */
 
         public override void OnClientAuthenticated(ClientObject client)
         {
@@ -215,51 +98,132 @@ namespace DMPServerListReporter
 
         public override void OnServerStop()
         {
-            DisconnectFromServer();
+            StopReporter();
         }
 
-        private void ConnectToServer()
+        private void StartReporter()
         {
-            try
+            reportThread = new Thread(ReporterMain);
+            reportThread.IsBackground = true;
+            reportThread.Start();
+        }
+
+        private void ReporterMain()
+        {
+            while (true)
             {
-                connection = new TcpClient();
-                connection.Connect(settingsStore.reportingEndpoint);
-                if (connection.Connected)
+                TcpClient newConnection = ConnectToServer();
+                if (newConnection != null)
                 {
-                    DarkLog.Debug("Connected to reporting server");
-                    sendMessages.Clear();
-                    ReportData();
-                    connectedStatus = true;
-                    sendThread = new Thread(new ThreadStart(SendThreadMain));
-                    sendThread.Start();
+                    currentConnection = newConnection;
+                    try
+                    {
+                        SendReportMain();
+                    }
+                    catch (Exception e)
+                    {
+                        if (!(e is ThreadAbortException))
+                        {
+                            currentConnection = null;
+                            DarkLog.Debug("Disconnected reporter, exception: " + e.Message);
+                            DarkLog.Debug("Reconnecting in 5 seconds...");
+                            Thread.Sleep(5000);
+                        }
+                    }
+                }
+                else
+                {
+                    DarkLog.Debug("All reporters are down, trying again in 60 seconds");
+                    Thread.Sleep(60000);
                 }
             }
-            catch (Exception e)
+        }
+
+        private void StopReporter()
+        {
+            DarkLog.Debug("Stopping reporter");
+            reportThread.Abort();
+            try
             {
-                DarkLog.Debug("Error connecting to reporting server: " + e);
+                currentConnection.Close();
+            }
+            catch
+            {
+                //Don't care.
             }
         }
 
-        private void DisconnectFromServer()
+        private TcpClient ConnectToServer()
         {
-            lastConnectionTry = long.MinValue;
-            sendThread.Abort();
-            connection.Close();
-            connectedStatus = false;
+            foreach (string currentEndpoint in settingsStore.reportingEndpoint)
+            {
+                try
+                {
+                    string addressString;
+                    string portString;
+                    if (currentEndpoint.Contains("[") || currentEndpoint.Contains("]:"))
+                    {
+                        int startIndex = currentEndpoint.IndexOf("[") + 1;
+                        int endIndex = currentEndpoint.LastIndexOf("]");
+                        addressString = currentEndpoint.Substring(startIndex, endIndex - startIndex);
+                        portString = currentEndpoint.Substring(endIndex + 2);
+                    }
+                    else
+                    {
+                        int portIndex = currentEndpoint.LastIndexOf(":");
+                        addressString = currentEndpoint.Substring(0, portIndex);
+                        portString = currentEndpoint.Substring(portIndex + 1);
+                    }
+                    int port = Int32.Parse(portString);
+                    IPAddress[] connectAddresses = new IPAddress[1];
+                    if (!IPAddress.TryParse(addressString, out connectAddresses[0]))
+                    {
+                        connectAddresses = Dns.GetHostAddresses(addressString);
+                    }
+                    foreach (IPAddress testAddress in connectAddresses)
+                    {
+                        TcpClient newConnection = new TcpClient(testAddress.AddressFamily);
+                        IAsyncResult ar = newConnection.BeginConnect(testAddress, port, null, null);
+                        if (ar.AsyncWaitHandle.WaitOne(5000))
+                        {
+                            if (newConnection.Connected)
+                            {
+                                //Connected!
+                                newConnection.EndConnect(ar);
+                                currentConnection = newConnection;
+                                DarkLog.Debug("Connected to " + currentEndpoint + " (" + testAddress + ")");
+                                return newConnection;
+                            }
+                            else
+                            {
+                                //Failed to connect - try next one
+                                DarkLog.Debug("Failed to connect to " + currentEndpoint + " (" + testAddress + ")");
+                            }
+                        }
+                        else
+                        {
+                            //Failed to connect - try next one
+                            DarkLog.Debug("Failed to connect to " + currentEndpoint + " (" + testAddress + ")");
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    DarkLog.Debug("Error connecting to " + currentEndpoint + ", exception: " + e.Message);
+                }
+            }
+            return null;
         }
 
-        private void SendThreadMain()
+        private void SendReportMain()
         {
-            try
+            sendMessages.Clear();
+            ReportData();
+            while (true)
             {
+                sendEvent.WaitOne(100);
                 while (true)
                 {
-                    if (Server.serverClock.ElapsedMilliseconds > (lastMessageSendTime + CONNECTION_HEARTBEAT))
-                    {
-                        lastMessageSendTime = Server.serverClock.ElapsedMilliseconds;
-                        //Queue a heartbeat to prevent the connection from timing out
-                        QueueHeartbeat();
-                    }
                     byte[] sendBytes = null;
                     lock (sendMessages)
                     {
@@ -274,24 +238,34 @@ namespace DMPServerListReporter
                     }
                     else
                     {
-                        sendEvent.WaitOne(100);
+                        break;
                     }
                 }
-            }
-            catch (Exception e)
-            {
-                DarkLog.Debug("Reporting send error: " + e);
-                connectedStatus = false;
+                if (Server.serverClock.ElapsedMilliseconds > (lastMessageSendTime + CONNECTION_HEARTBEAT))
+                {
+                    lastMessageSendTime = Server.serverClock.ElapsedMilliseconds;
+                    //Queue a heartbeat to prevent the connection from timing out
+                    QueueHeartbeat();
+                }
             }
         }
 
         private void SendNetworkMessage(byte[] data)
         {
-            connection.GetStream().Write(data, 0, data.Length);
+            currentConnection.GetStream().Write(data, 0, data.Length);
         }
 
         private void ReportData()
         {
+            string[] currentPlayers = GetServerPlayerArray();
+            if (currentPlayers.Length == 1)
+            {
+                DarkLog.Debug("Sending report: 1 player.");
+            }
+            else
+            {
+                DarkLog.Debug("Sending report: " + currentPlayers.Length + " players.");
+            }
             using (MessageWriter mw = new MessageWriter())
             {
                 mw.Write<string>(settingsStore.serverHash);
@@ -318,7 +292,7 @@ namespace DMPServerListReporter
                 mw.Write<string>(settingsStore.team);
                 mw.Write<string>(settingsStore.location);
                 mw.Write<bool>(settingsStore.fixedIP);
-                mw.Write<string[]>(GetServerPlayerArray());
+                mw.Write<string[]>(currentPlayers);
                 QueueNetworkMessage(mw.GetMessageBytes());
             }
         }
