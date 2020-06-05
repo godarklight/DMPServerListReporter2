@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Reference Include="Common">
+      <HintPath>../Common.dll</HintPath>
+    </Reference>
+    <Reference Include="MessageWriter2">
+      <HintPath>../MessageWriter2.dll</HintPath>
+    </Reference>
+    <Reference Include="DMPServer">
+      <HintPath>../DMPServer.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+  </PropertyGroup>
+
+</Project>

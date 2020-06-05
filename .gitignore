@@ -2,7 +2,9 @@
 *.exe
 *.dll
 *.userprefs
-DMPServerListReporter/bin/*
-DMPServerListReporter/obj/*
+DMPServerListReporter/bin
+DMPServerListReporter/obj
 *.suo
 *.csproj.user
+DotNet/bin
+DotNet/obj
