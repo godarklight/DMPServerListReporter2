@@ -30,19 +30,19 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Xml" />
     <Reference Include="DarkMultiPlayer-Common">
-      <HintPath>..\DarkMultiPlayer-Common.dll</HintPath>
+      <HintPath>..\..\..\Server\bin\Release\DarkMultiPlayer-Common.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="DMPServer">
-      <HintPath>..\DMPServer.exe</HintPath>
+      <HintPath>..\..\..\Server\bin\Release\DMPServer.exe</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="MessageWriter2">
-      <HintPath>..\MessageWriter2.dll</HintPath>
+      <HintPath>..\..\..\Server\bin\Release\MessageWriter2.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />

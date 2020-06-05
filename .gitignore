@@ -6,5 +6,6 @@ DMPServerListReporter/bin
 DMPServerListReporter/obj
 *.suo
 *.csproj.user
+UserPrefs.xml
 DotNet/bin
 DotNet/obj
