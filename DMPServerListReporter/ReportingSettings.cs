@@ -41,6 +41,7 @@ namespace DMPServerListReporter
                 {
                     reportingEndpoint.Add("server.game.api.d-mp.org:9001");
                     reportingEndpoint.Add("godarklight.info.tm:9001");
+                    reportingEndpoint.Add("ksp-dmp.sundevil.pl:12401");
                     SaveXMLSettings(newSettingsFileFullPath);
                 }
                 LoadXMLSettings(newSettingsFileFullPath);
