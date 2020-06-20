@@ -31,7 +31,7 @@ namespace DMPServerListReporter
             {
                 DarkMultiPlayerServer.DarkLog.Debug("Upgraded reporting settings file");
                 LoadOldSettings(oldSettingsFileFullPath, descriptionFileFullPath);
-                reportingEndpoint.Add("godarklight.info.tm:9001");
+                reportingEndpoint.Add("godarklight.privatedns.org:9001");
                 SaveXMLSettings(newSettingsFileFullPath);
                 File.Delete(oldSettingsFileFullPath);
             }
@@ -40,7 +40,7 @@ namespace DMPServerListReporter
                 if (!File.Exists(newSettingsFileFullPath))
                 {
                     reportingEndpoint.Add("server.game.api.d-mp.org:9001");
-                    reportingEndpoint.Add("godarklight.info.tm:9001");
+                    reportingEndpoint.Add("godarklight.privatedns.org:9001");
                     reportingEndpoint.Add("ksp-dmp.sundevil.pl:12401");
                     SaveXMLSettings(newSettingsFileFullPath);
                 }
