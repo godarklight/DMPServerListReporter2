@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Server\Server.csproj" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFrameworks>net472;net5.0</TargetFrameworks>
   </PropertyGroup>
