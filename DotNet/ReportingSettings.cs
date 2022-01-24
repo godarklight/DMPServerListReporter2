@@ -1,1 +1,0 @@
-../DMPServerListReporter/ReportingSettings.cs
